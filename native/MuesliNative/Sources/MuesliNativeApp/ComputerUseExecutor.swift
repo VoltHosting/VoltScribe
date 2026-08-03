@@ -284,8 +284,12 @@ enum ComputerUseToolExecutor {
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         keyDown?.flags = flags
         keyUp?.flags = flags
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
+        guard let keyDown, let keyUp,
+              SyntheticEventPostingGate.shared.post(keyDown),
+              SyntheticEventPostingGate.shared.post(keyUp)
+        else {
+            return .failed("Synthetic keyboard input is not authorised")
+        }
         return .executed("Pressed key")
     }
 
@@ -318,7 +322,9 @@ enum ComputerUseToolExecutor {
             wheel2: deltas.horizontal,
             wheel3: 0
         )
-        event?.post(tap: .cghidEventTap)
+        guard let event, SyntheticEventPostingGate.shared.post(event) else {
+            return .failed("Synthetic scroll input is not authorised")
+        }
         return .executed("Scrolled \(direction.rawValue)")
     }
 
@@ -690,6 +696,9 @@ enum ComputerUseToolExecutor {
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
             return .failed("Could not create mouse event")
         }
+        guard SyntheticEventPostingGate.shared.isPostingAllowed() else {
+            return .failed("Synthetic pointer input is not authorised")
+        }
 
         ComputerUseCursorOverlay.shared.show(at: point, label: toolCall.label)
         CGWarpMouseCursorPosition(point)
@@ -714,8 +723,11 @@ enum ComputerUseToolExecutor {
             }
             mouseDown.setIntegerValueField(.mouseEventClickState, value: Int64(clickIndex))
             mouseUp.setIntegerValueField(.mouseEventClickState, value: Int64(clickIndex))
-            mouseDown.post(tap: .cghidEventTap)
-            mouseUp.post(tap: .cghidEventTap)
+            guard SyntheticEventPostingGate.shared.post(mouseDown),
+                  SyntheticEventPostingGate.shared.post(mouseUp)
+            else {
+                return .failed("Synthetic pointer input is not authorised")
+            }
         }
         let label = toolCall.label?.trimmingCharacters(in: .whitespacesAndNewlines)
         return .executed("Clicked \(label?.isEmpty == false ? label! : "point")")
@@ -727,6 +739,9 @@ enum ComputerUseToolExecutor {
     ) -> ComputerUseExecutionResult {
         guard let point = screenPoint(for: toolCall, registry: registry) else {
             return .failed("No current screenshot for cursor move")
+        }
+        guard SyntheticEventPostingGate.shared.isPostingAllowed() else {
+            return .failed("Synthetic pointer input is not authorised")
         }
         CGWarpMouseCursorPosition(point)
         ComputerUseCursorOverlay.shared.show(at: point, label: toolCall.label)
@@ -765,21 +780,27 @@ enum ComputerUseToolExecutor {
         }
 
         ComputerUseCursorOverlay.shared.show(at: start, label: toolCall.label)
-        mouseDown.post(tap: .cghidEventTap)
+        guard SyntheticEventPostingGate.shared.post(mouseDown) else {
+            return .failed("Synthetic pointer input is not authorised")
+        }
         for step in 1...12 {
             let progress = CGFloat(step) / 12
             let point = CGPoint(
                 x: start.x + ((end.x - start.x) * progress),
                 y: start.y + ((end.y - start.y) * progress)
             )
-            CGEvent(
+            if let dragEvent = CGEvent(
                 mouseEventSource: source,
                 mouseType: .leftMouseDragged,
                 mouseCursorPosition: point,
                 mouseButton: .left
-            )?.post(tap: .cghidEventTap)
+            ), !SyntheticEventPostingGate.shared.post(dragEvent) {
+                return .failed("Synthetic pointer input is not authorised")
+            }
         }
-        mouseUp.post(tap: .cghidEventTap)
+        guard SyntheticEventPostingGate.shared.post(mouseUp) else {
+            return .failed("Synthetic pointer input is not authorised")
+        }
         ComputerUseCursorOverlay.shared.show(at: end, label: toolCall.label)
         return .executed("Dragged pointer")
     }
@@ -1060,9 +1081,8 @@ enum ComputerUseToolExecutor {
               let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
               let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
         else { return false }
-        mouseDown.post(tap: .cghidEventTap)
-        mouseUp.post(tap: .cghidEventTap)
-        return true
+        return SyntheticEventPostingGate.shared.post(mouseDown)
+            && SyntheticEventPostingGate.shared.post(mouseUp)
     }
 
     private static func rect(of element: AXUIElement) -> CGRect? {

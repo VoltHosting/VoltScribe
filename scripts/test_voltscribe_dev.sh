@@ -31,4 +31,29 @@ expect_line "entitlements=$ROOT/scripts/MuesliLocalOnly.entitlements"
 expect_line "skip_sign=1"
 expect_line "scratch_path=$HOME/Library/Caches/muesli-spm/voltscribe-dev/app"
 
-printf 'VoltScribe development branding configuration passed.\n'
+APP_SOURCE="$ROOT/native/MuesliNative/Sources/MuesliNativeApp"
+ONBOARDING_CONTROLLER="$APP_SOURCE/OnboardingWindowController.swift"
+INPUT_SAFETY_POLICY="$APP_SOURCE/InputSafetyPolicy.swift"
+
+if grep -R --include='*.swift' -n '\.post(tap:' "$APP_SOURCE" \
+  | grep -Fv "$INPUT_SAFETY_POLICY:" >/dev/null; then
+  echo "Synthetic event posting bypasses InputSafetyPolicy.swift" >&2
+  grep -R --include='*.swift' -n '\.post(tap:' "$APP_SOURCE" \
+    | grep -Fv "$INPUT_SAFETY_POLICY:" >&2 || true
+  exit 1
+fi
+
+if grep -Fq 'orderFrontRegardless' "$ONBOARDING_CONTROLLER"; then
+  echo "Onboarding must not force a non-active accessory window to the front" >&2
+  exit 1
+fi
+
+grep -Fq 'setActivationPolicy(.regular)' "$ONBOARDING_CONTROLLER"
+grep -Fq 'SyntheticEventPostingGate.shared.setRuntimeEnabled(canRunMainApp)' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'StatusBarRuntimePolicy.shouldExposeRuntimeActions' \
+  "$APP_SOURCE/StatusBarController.swift"
+grep -Fq 'title: "Quit \(AppIdentity.displayName)"' \
+  "$APP_SOURCE/StatusBarController.swift"
+
+printf 'VoltScribe development branding and input-safety configuration passed.\n'

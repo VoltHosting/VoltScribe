@@ -585,6 +585,7 @@ final class MuesliController: NSObject {
         let canRunMainApp = config.hasCompletedOnboarding
             && hasRequiredStartupPermissions(for: config.resolvedOnboardingUseCase)
         meetingFeatureMonitorsAllowed = canRunMainApp
+        SyntheticEventPostingGate.shared.setRuntimeEnabled(canRunMainApp)
 
         // Defer permission-triggering monitors until after onboarding
         if canRunMainApp && config.resolvedOnboardingUseCase.includesPushToTalk {
@@ -789,6 +790,7 @@ final class MuesliController: NSObject {
     }
 
     func shutdown() {
+        SyntheticEventPostingGate.shared.setRuntimeEnabled(false)
         if let workspaceObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
             self.workspaceObserver = nil
@@ -3324,6 +3326,7 @@ final class MuesliController: NSObject {
     // MARK: - Onboarding
 
     func showOnboarding(resumeFrom progress: OnboardingProgress? = nil) {
+        SyntheticEventPostingGate.shared.setRuntimeEnabled(false)
         let wc = OnboardingWindowController(controller: self, resumeProgress: progress)
         self.onboardingWindowController = wc
         wc.show()
@@ -3629,6 +3632,7 @@ final class MuesliController: NSObject {
         onboardingWindowController?.close()
         onboardingWindowController = nil
         if hasRequiredStartupPermissions(for: onboardingUseCase) {
+            SyntheticEventPostingGate.shared.setRuntimeEnabled(true)
             meetingFeatureMonitorsAllowed = true
             if onboardingUseCase.includesPushToTalk {
                 hotkeyMonitor.start()
@@ -3651,6 +3655,7 @@ final class MuesliController: NSObject {
             let completionTab = OnboardingFlow.completionTab(for: onboardingUseCase)
             openHistoryWindow(tab: completionTab)
         } else {
+            SyntheticEventPostingGate.shared.setRuntimeEnabled(false)
             showOnboarding(resumeFrom: onboardingProgressForPermissionRepair())
         }
     }
@@ -3710,6 +3715,7 @@ final class MuesliController: NSObject {
         ) else { return }
 
         updateConfig { $0.onboardingUseCase = OnboardingUseCase.dictation.rawValue }
+        SyntheticEventPostingGate.shared.setRuntimeEnabled(true)
         hotkeyMonitor.configure(keyCode: config.dictationHotkey.keyCode)
         hotkeyMonitor.start()
         startComputerUseHotkeyMonitorIfNeeded()

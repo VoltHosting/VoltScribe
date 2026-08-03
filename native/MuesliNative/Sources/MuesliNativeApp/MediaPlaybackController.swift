@@ -160,7 +160,7 @@ final class SystemMediaPlaybackClient: MediaPlaybackClient {
             data1: data1,
             data2: -1
         )?.cgEvent else { return }
-        event.post(tap: .cghidEventTap)
+        SyntheticEventPostingGate.shared.post(event)
     }
 }
 

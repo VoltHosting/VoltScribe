@@ -21,10 +21,20 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
 
     func bringToFront() {
-        window?.level = .floating
-        window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        guard let window else { return }
+        let presentation = OnboardingPresentationCoordinator(
+            useRegularActivationPolicy: {
+                _ = NSApplication.shared.setActivationPolicy(.regular)
+            },
+            activateApplication: {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            },
+            presentWindow: {
+                window.level = .normal
+                window.makeKeyAndOrderFront(nil)
+            }
+        )
+        presentation.present()
     }
 
     func yieldFocusToSystemSettings() {
@@ -34,15 +44,13 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
 
     func prepareForNativePermissionPrompt() {
-        guard let window else { return }
-        window.level = .normal
-        window.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        bringToFront()
     }
 
     func close() {
         window?.close()
         window = nil
+        _ = NSApplication.shared.setActivationPolicy(.accessory)
     }
 
     private func buildWindow() {
@@ -57,7 +65,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         window.delegate = self
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.level = .floating
+        window.level = .normal
         window.collectionBehavior = [.moveToActiveSpace]
         window.backgroundColor = NSColor(red: 0.067, green: 0.071, blue: 0.078, alpha: 1)
 

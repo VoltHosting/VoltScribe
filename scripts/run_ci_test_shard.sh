@@ -27,6 +27,8 @@ case "${shard}" in
       OpenAILogoShapeTests
       MeetingChunkCollectorTests
       AppConfigTests
+      AppRuntimePolicyTests
+      InputSafetyPolicyTests
       CGPointCodableTests
       UpdateFailureGuidanceTests
       WordCountTests
