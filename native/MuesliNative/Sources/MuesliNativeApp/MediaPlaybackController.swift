@@ -143,13 +143,18 @@ final class SystemMediaPlaybackClient: MediaPlaybackClient {
     }
 
     private func postAuxKey(keyCode: Int) {
-        postAuxKeyEvent(keyCode: keyCode, keyState: 0xA)
-        postAuxKeyEvent(keyCode: keyCode, keyState: 0xB)
+        guard let keyDown = makeAuxKeyEvent(keyCode: keyCode, keyState: 0xA),
+              let keyUp = makeAuxKeyEvent(keyCode: keyCode, keyState: 0xB)
+        else { return }
+        SyntheticEventPostingGate.shared.withAuthorizedSequence { sequence in
+            sequence.post(keyDown)
+            sequence.post(keyUp)
+        }
     }
 
-    private func postAuxKeyEvent(keyCode: Int, keyState: Int) {
+    private func makeAuxKeyEvent(keyCode: Int, keyState: Int) -> CGEvent? {
         let data1 = (keyCode << 16) | (keyState << 8)
-        guard let event = NSEvent.otherEvent(
+        return NSEvent.otherEvent(
             with: .systemDefined,
             location: .zero,
             modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(keyState << 8)),
@@ -159,8 +164,7 @@ final class SystemMediaPlaybackClient: MediaPlaybackClient {
             subtype: 8,
             data1: data1,
             data2: -1
-        )?.cgEvent else { return }
-        event.post(tap: .cghidEventTap)
+        )?.cgEvent
     }
 }
 

@@ -495,7 +495,14 @@ final class MuesliController: NSObject {
             $0.backend == loadedConfig.meetingSummaryBackend
         }) ?? .chatGPT
         self.selectedPostProcessorBackend = loadedPostProcessorBackend
-        self.indicator = FloatingIndicatorController(configStore: configStore)
+        self.indicator = FloatingIndicatorController(
+            configStore: configStore,
+            presentationAllowed: {
+                FloatingIndicatorPresentationPolicy.canPresent(
+                    runtimeEnabled: SyntheticEventPostingGate.shared.isRuntimeEnabled()
+                )
+            }
+        )
         ComputerUseCursorOverlay.shared.attachIndicator(self.indicator)
         super.init()
         dictationAudioSessionManager.onEvent = { [weak self] event in
@@ -584,7 +591,7 @@ final class MuesliController: NSObject {
 
         let canRunMainApp = config.hasCompletedOnboarding
             && hasRequiredStartupPermissions(for: config.resolvedOnboardingUseCase)
-        meetingFeatureMonitorsAllowed = canRunMainApp
+        setMainRuntimeEnabled(canRunMainApp, synchronizeMeetingMonitors: false)
 
         // Defer permission-triggering monitors until after onboarding
         if canRunMainApp && config.resolvedOnboardingUseCase.includesPushToTalk {
@@ -724,8 +731,10 @@ final class MuesliController: NSObject {
         // Calendar monitor populates the "Coming Up" section even when
         // meeting detection is turned off for meeting use cases. Also keep it
         // running for existing users who enabled meeting feature settings before
-        // onboarding use cases existed.
+        // onboarding use cases existed. Provider and callback wiring above must
+        // complete before either monitor can evaluate startup state.
         syncCalendarMonitor()
+        syncMeetingDetectionMonitor()
 
         // Defer permission-triggering monitors until after onboarding
         if canRunMainApp && shouldRunMeetingFeatureMonitors {
@@ -789,6 +798,7 @@ final class MuesliController: NSObject {
     }
 
     func shutdown() {
+        setMainRuntimeEnabled(false)
         if let workspaceObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
             self.workspaceObserver = nil
@@ -810,15 +820,6 @@ final class MuesliController: NSObject {
         iCloudSyncDebounceTask = nil
         iCloudSubscriptionTask?.cancel()
         iCloudSubscriptionTask = nil
-        hotkeyMonitor.stop()
-        computerUseHotkeyMonitor.stop()
-        meetingRecordingHotkeyMonitor.stop()
-        computerUseCommandTask?.cancel()
-        computerUseCommandTask = nil
-        computerUseCommandTaskID = nil
-        activeComputerUseAudioSessionID = nil
-        pendingComputerUseStopSessionID = nil
-        pendingComputerUseStopStartedAt = nil
         calendarMonitor.stop()
         calendarCheckTimer?.invalidate()
         calendarCheckTimer = nil
@@ -827,7 +828,6 @@ final class MuesliController: NSObject {
         meetingStartingNowTimers.removeAll()
         notifiedUpcomingEventIDs.removeAll()
         autoRecordedCalendarEventIDs.removeAll()
-        meetingFeatureMonitorsAllowed = false
         disarmMeetingAutoStop()
         meetingMonitor.stop()
         meetingDetectionMonitorStarted = false
@@ -1051,12 +1051,51 @@ final class MuesliController: NSObject {
     }
 
     func refreshIndicatorVisibility() {
-        if config.showFloatingIndicator {
+        switch FloatingIndicatorRuntimePolicy.action(
+            runtimeEnabled: meetingFeatureMonitorsAllowed,
+            userEnabled: config.showFloatingIndicator
+        ) {
+        case .show:
             indicator.ensureVisible(config: config)
-        } else {
+        case .closeIfIdle:
             indicator.closeIfIdle()
+        case .close:
+            indicator.closeForRuntimeShutdown()
         }
         indicator.refreshMeetingTranscriptPreference(config: config)
+    }
+
+    private func setMainRuntimeEnabled(
+        _ enabled: Bool,
+        synchronizeMeetingMonitors: Bool = true
+    ) {
+        if !enabled {
+            stopInputRuntimeActivity()
+        }
+        SyntheticEventPostingGate.shared.setRuntimeEnabled(enabled)
+        meetingFeatureMonitorsAllowed = enabled
+        if synchronizeMeetingMonitors {
+            syncCalendarMonitor()
+            syncMeetingDetectionMonitor()
+        }
+        statusBarController?.refresh()
+        refreshIndicatorVisibility()
+    }
+
+    private func stopInputRuntimeActivity() {
+        hotkeyMonitor.stop()
+        computerUseHotkeyMonitor.stop()
+        meetingRecordingHotkeyMonitor.stop()
+        computerUseCommandTask?.cancel()
+        computerUseCommandTask = nil
+        computerUseCommandTaskID = nil
+        computerUseFloatingStatusWorkItem?.cancel()
+        computerUseFloatingStatusWorkItem = nil
+        computerUseAudioSessionManager.cancel(reason: "runtime_disabled")
+        activeComputerUseAudioSessionID = nil
+        computerUseCommandStartedAt = nil
+        pendingComputerUseStopSessionID = nil
+        pendingComputerUseStopStartedAt = nil
     }
 
     func refreshUI() {
@@ -3324,6 +3363,7 @@ final class MuesliController: NSObject {
     // MARK: - Onboarding
 
     func showOnboarding(resumeFrom progress: OnboardingProgress? = nil) {
+        setMainRuntimeEnabled(false)
         let wc = OnboardingWindowController(controller: self, resumeProgress: progress)
         self.onboardingWindowController = wc
         wc.show()
@@ -3460,12 +3500,15 @@ final class MuesliController: NSObject {
         setState(.idle)
     }
 
-    func startHotkeyMonitor(keyCode: UInt16? = nil) {
+    func startOnboardingHotkeyMonitor(keyCode: UInt16? = nil) {
         if let keyCode {
             hotkeyMonitor.configure(keyCode: keyCode)
         }
-        hotkeyMonitor.start()
-        startComputerUseHotkeyMonitorIfNeeded()
+        let policy = HotkeyMonitorStartPolicy.onboarding
+        hotkeyMonitor.start(policy: policy)
+        if policy.startComputerUseMonitor {
+            startComputerUseHotkeyMonitorIfNeeded()
+        }
     }
 
     func stopHotkeyMonitor() {
@@ -3629,7 +3672,7 @@ final class MuesliController: NSObject {
         onboardingWindowController?.close()
         onboardingWindowController = nil
         if hasRequiredStartupPermissions(for: onboardingUseCase) {
-            meetingFeatureMonitorsAllowed = true
+            setMainRuntimeEnabled(true)
             if onboardingUseCase.includesPushToTalk {
                 hotkeyMonitor.start()
                 startComputerUseHotkeyMonitorIfNeeded()
@@ -3651,6 +3694,7 @@ final class MuesliController: NSObject {
             let completionTab = OnboardingFlow.completionTab(for: onboardingUseCase)
             openHistoryWindow(tab: completionTab)
         } else {
+            setMainRuntimeEnabled(false)
             showOnboarding(resumeFrom: onboardingProgressForPermissionRepair())
         }
     }
@@ -3710,6 +3754,7 @@ final class MuesliController: NSObject {
         ) else { return }
 
         updateConfig { $0.onboardingUseCase = OnboardingUseCase.dictation.rawValue }
+        setMainRuntimeEnabled(true)
         hotkeyMonitor.configure(keyCode: config.dictationHotkey.keyCode)
         hotkeyMonitor.start()
         startComputerUseHotkeyMonitorIfNeeded()
@@ -6578,6 +6623,10 @@ final class MuesliController: NSObject {
     }
 
     private func configureComputerUseHotkeyMonitor() {
+        guard meetingFeatureMonitorsAllowed else {
+            computerUseHotkeyMonitor.stop()
+            return
+        }
         guard config.enableComputerUseHotkey else {
             computerUseHotkeyMonitor.stop()
             return
@@ -6593,6 +6642,10 @@ final class MuesliController: NSObject {
     }
 
     private func startComputerUseHotkeyMonitorIfNeeded() {
+        guard meetingFeatureMonitorsAllowed else {
+            computerUseHotkeyMonitor.stop()
+            return
+        }
         guard config.enableComputerUseHotkey else {
             computerUseHotkeyMonitor.stop()
             return
@@ -6618,6 +6671,10 @@ final class MuesliController: NSObject {
     }
 
     private func startMeetingRecordingHotkeyMonitorIfNeeded() {
+        guard meetingFeatureMonitorsAllowed else {
+            meetingRecordingHotkeyMonitor.stop()
+            return
+        }
         guard config.enableMeetingRecordingHotkey else {
             meetingRecordingHotkeyMonitor.stop()
             return

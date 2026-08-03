@@ -105,6 +105,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func rebuildMenu() {
         menu.removeAllItems()
 
+        guard StatusBarRuntimePolicy.shouldExposeRuntimeActions(
+            runtimeEnabled: SyntheticEventPostingGate.shared.isRuntimeEnabled()
+        ) else {
+            menu.addItem(actionItem(
+                title: "Quit \(AppIdentity.displayName)",
+                action: #selector(MuesliController.quitApp)
+            ))
+            return
+        }
+
         // Upcoming calendar events
         let hidden = controller.appState.hiddenCalendarEventIDs
         let upcomingEvents = controller.appState.upcomingCalendarEvents.filter { !$0.isAllDay && !hidden.contains($0.id) }

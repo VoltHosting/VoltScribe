@@ -1576,7 +1576,7 @@ struct OnboardingView: View {
         dictationTestError = nil
         controller.dictationTestBackend = selectedBackend
         controller.dictationTestCohereLanguage = selectedCohereLanguage
-        controller.startHotkeyMonitor(keyCode: selectedHotkey.keyCode)
+        controller.startOnboardingHotkeyMonitor(keyCode: selectedHotkey.keyCode)
     }
 
     private func advanceAfterSuccessfulDictationTest(text: String) {

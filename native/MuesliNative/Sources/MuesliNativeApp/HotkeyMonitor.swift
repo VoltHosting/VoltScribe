@@ -99,24 +99,32 @@ final class HotkeyMonitor {
         }
     }
 
-    func start() {
-        guard globalMonitor == nil, localMonitor == nil else { return }
+    private var startPolicy = HotkeyMonitorStartPolicy.production
+
+    func start(policy: HotkeyMonitorStartPolicy = .production) {
+        if globalMonitor != nil || localMonitor != nil {
+            guard startPolicy != policy else { return }
+            stop()
+        }
+        startPolicy = policy
 
         let hasListenAccess = CGPreflightListenEventAccess()
         fputs("[hotkey] listen event access: \(hasListenAccess)\n", stderr)
-        if !hasListenAccess {
+        if policy.requestListenEventAccess && !hasListenAccess {
             let requested = CGRequestListenEventAccess()
             fputs("[hotkey] requested listen event access: \(requested)\n", stderr)
         }
 
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) { [weak self] event in
-            self?.handle(event)
+        if hasListenAccess || policy.requestListenEventAccess {
+            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) { [weak self] event in
+                self?.handle(event)
+            }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) { [weak self] event in
             guard let self else { return event }
             if self.shouldHandleLocalEvent(event) {
                 let consumed = self.handle(event)
-                if consumed { return nil }
+                if policy.consumeLocalEvents && consumed { return nil }
             }
             return event
         }
@@ -177,8 +185,9 @@ final class HotkeyMonitor {
     }
 
     func restart() {
+        let policy = startPolicy
         stop()
-        start()
+        start(policy: policy)
     }
 
     private func restartIfRunning() {

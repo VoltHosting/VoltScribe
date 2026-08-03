@@ -119,6 +119,7 @@ final class FloatingIndicatorController: NSObject {
     private var isHovered = false
     private var hoverExitWorkItem: DispatchWorkItem?
     private let configStore: ConfigStore
+    private let presentationAllowed: () -> Bool
     private var isMeetingRecording = false
     private var isMeetingRecordingPaused = false
     private var isMeetingTranscriptManuallyDismissed = false
@@ -165,8 +166,12 @@ final class FloatingIndicatorController: NSObject {
         case waiting
     }
 
-    init(configStore: ConfigStore) {
+    init(
+        configStore: ConfigStore,
+        presentationAllowed: @escaping () -> Bool = { true }
+    ) {
         self.configStore = configStore
+        self.presentationAllowed = presentationAllowed
         super.init()
     }
 
@@ -347,6 +352,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     private func showMeetingTranscript() {
+        guard presentationAllowed() else { return }
         guard let panel,
               let containerView,
               let contentView,
@@ -414,6 +420,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     func setState(_ state: DictationState, config: AppConfig) {
+        guard presentationAllowed() else { return }
         let previousState = self.state
         let previousHover = isHovered
         if isComputerUseCursorMode {
@@ -553,6 +560,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     func showComputerUseCursor(at quartzPoint: CGPoint, label rawLabel: String?) {
+        guard presentationAllowed() else { return }
         let config = configStore.load()
         if panel == nil {
             createPanel(config: config)
@@ -640,6 +648,7 @@ final class FloatingIndicatorController: NSObject {
 
     /// Flash a brief warning message on the indicator pill, then snap back to idle.
     func showWarning(_ message: String, icon: String = "⚡", duration: TimeInterval = 2.5) {
+        guard presentationAllowed() else { return }
         guard state == .idle else { return }
         let config = configStore.load()
         if panel == nil { createPanel(config: config) }
@@ -713,6 +722,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     func showLoading(_ message: String) {
+        guard presentationAllowed() else { return }
         let config = configStore.load()
         if panel == nil { createPanel(config: config) }
         guard let panel, let contentView, let textLabel else { return }
@@ -855,6 +865,23 @@ final class FloatingIndicatorController: NSObject {
 
     func closeIfIdle() {
         if state == .idle, !isShowingLoading { close() }
+    }
+
+    func closeForRuntimeShutdown() {
+        state = .idle
+        isShowingLoading = false
+        isMeetingRecording = false
+        isMeetingRecordingPaused = false
+        isToggleDictation = false
+        isComputerUseCursorMode = false
+        computerUseCursorReturnFrame = nil
+        computerUseTranscriptText = nil
+        transcribingTitle = "Transcribing"
+        powerProvider = nil
+        loadingSpinner?.stopAnimation(nil)
+        loadingSpinner?.removeFromSuperview()
+        loadingSpinner = nil
+        close()
     }
 
     func close() {
@@ -1226,6 +1253,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     private func createPanel(config: AppConfig) {
+        guard presentationAllowed() else { return }
         let panel = InteractiveFloatingPanel(
             contentRect: frameForState(.idle, config: config),
             styleMask: .borderless,
