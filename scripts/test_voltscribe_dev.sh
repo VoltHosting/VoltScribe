@@ -43,17 +43,111 @@ if grep -R --include='*.swift' -n '\.post(tap:' "$APP_SOURCE" \
   exit 1
 fi
 
+if grep -R --include='*.swift' -n 'SyntheticEventPostingGate\.shared\.post(' "$APP_SOURCE" >/dev/null; then
+  echo "Synthetic events must use an atomic withAuthorizedSequence transaction" >&2
+  grep -R --include='*.swift' -n 'SyntheticEventPostingGate\.shared\.post(' "$APP_SOURCE" >&2 || true
+  exit 1
+fi
+
+if grep -R --include='*.swift' -nE 'CGEventPost|postToPid|CGDisplayMoveCursorToPoint|IOHID[A-Za-z]*Post' \
+  "$APP_SOURCE" >/dev/null; then
+  echo "Unapproved synthetic input API bypasses InputSafetyPolicy.swift" >&2
+  exit 1
+fi
+
 if grep -Fq 'orderFrontRegardless' "$ONBOARDING_CONTROLLER"; then
   echo "Onboarding must not force a non-active accessory window to the front" >&2
   exit 1
 fi
 
 grep -Fq 'setActivationPolicy(.regular)' "$ONBOARDING_CONTROLLER"
-grep -Fq 'SyntheticEventPostingGate.shared.setRuntimeEnabled(canRunMainApp)' \
+grep -Fq 'setMainRuntimeEnabled(canRunMainApp, synchronizeMeetingMonitors: false)' \
   "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'SyntheticEventPostingGate.shared.setRuntimeEnabled(enabled)' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'let lease = SyntheticEventPostingLease' \
+  "$INPUT_SAFETY_POLICY"
+grep -Fq 'lease.invalidate()' \
+  "$INPUT_SAFETY_POLICY"
+grep -Fq 'admissionThreadKey' \
+  "$INPUT_SAFETY_POLICY"
+grep -Fq 'meetingFeatureMonitorsAllowed = enabled' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'syncCalendarMonitor()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'syncMeetingDetectionMonitor()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'setMainRuntimeEnabled(canRunMainApp, synchronizeMeetingMonitors: false)' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'if synchronizeMeetingMonitors {' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'stopInputRuntimeActivity()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'hotkeyMonitor.stop()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'computerUseHotkeyMonitor.stop()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'meetingRecordingHotkeyMonitor.stop()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'computerUseCommandTask?.cancel()' \
+  "$APP_SOURCE/MuesliController.swift"
+if [ "$(grep -Fc 'guard meetingFeatureMonitorsAllowed else' "$APP_SOURCE/MuesliController.swift")" -lt 3 ]; then
+  echo "Secondary production hotkey helpers must fail closed while runtime monitors are disabled" >&2
+  exit 1
+fi
 grep -Fq 'StatusBarRuntimePolicy.shouldExposeRuntimeActions' \
+  "$APP_SOURCE/StatusBarController.swift"
+grep -Fq 'runtimeEnabled: SyntheticEventPostingGate.shared.isRuntimeEnabled()' \
   "$APP_SOURCE/StatusBarController.swift"
 grep -Fq 'title: "Quit \(AppIdentity.displayName)"' \
   "$APP_SOURCE/StatusBarController.swift"
+grep -Fq 'static func shouldShow' \
+  "$INPUT_SAFETY_POLICY"
+grep -Fq 'FloatingIndicatorRuntimePolicy.action' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'indicator.closeIfIdle()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'indicator.closeForRuntimeShutdown()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'FloatingIndicatorPresentationPolicy.canPresent' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'guard presentationAllowed() else { return }' \
+  "$APP_SOURCE/FloatingIndicatorController.swift"
+grep -Fq 'setMainRuntimeEnabled(false)' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'indicator.close()' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'startOnboardingHotkeyMonitor' \
+  "$APP_SOURCE/OnboardingView.swift"
+grep -Fq 'hotkeyMonitor.start(policy: policy)' \
+  "$APP_SOURCE/MuesliController.swift"
+grep -Fq 'ComputerUseRuntimePolicy.canExecute' \
+  "$APP_SOURCE/ComputerUseExecutor.swift"
+grep -Fq 'try processBox.launch(process)' \
+  "$APP_SOURCE/ComputerUseBrowserAutomation.swift"
+grep -Fq 'ProcessOutputCaptureBox' \
+  "$APP_SOURCE/ComputerUseBrowserAutomation.swift"
+grep -Fq 'readers.wait()' \
+  "$APP_SOURCE/ComputerUseBrowserAutomation.swift"
+grep -Fq 'completeIfNotCancelled' \
+  "$APP_SOURCE/ComputerUseBrowserAutomation.swift"
+if grep -Fq 'processBox.set(process)' "$APP_SOURCE/ComputerUseBrowserAutomation.swift"; then
+  echo "AppleScript process registration and launch must remain atomic" >&2
+  exit 1
+fi
+if [ "$(grep -Fc 'guard runtimeAllowsExecution() else' "$APP_SOURCE/ComputerUseExecutor.swift")" -lt 10 ]; then
+  echo "Async computer-use mutations must revalidate runtime after suspension" >&2
+  exit 1
+fi
+grep -Fq 'browserProcessPreLaunchCancellationIsDeterministic' \
+  "$ROOT/native/MuesliNative/Tests/MuesliTests/ComputerUseExecutorTests.swift"
+grep -Fq 'browserProcessCancellationTerminatesChild' \
+  "$ROOT/native/MuesliNative/Tests/MuesliTests/ComputerUseExecutorTests.swift"
+grep -Fq 'browserProcessLateCancellationSuppressesCompletion' \
+  "$ROOT/native/MuesliNative/Tests/MuesliTests/ComputerUseExecutorTests.swift"
+grep -Fq 'browserProcessCompletionLinearizesBeforeCancellation' \
+  "$ROOT/native/MuesliNative/Tests/MuesliTests/ComputerUseExecutorTests.swift"
+grep -Fq 'browserProcessDrainsLargeOutput' \
+  "$ROOT/native/MuesliNative/Tests/MuesliTests/ComputerUseExecutorTests.swift"
 
 printf 'VoltScribe development branding and input-safety configuration passed.\n'

@@ -80,6 +80,9 @@ enum ComputerUseToolExecutor {
         _ toolCall: ComputerUseToolCall,
         registry: ComputerUseElementRegistry?
     ) async -> ComputerUseExecutionResult {
+        guard runtimeAllowsExecution() else {
+            return .cancelled("Computer use runtime is disabled")
+        }
         if let failure = toolCall.validationFailure() {
             return .unsupported(failure)
         }
@@ -165,6 +168,12 @@ enum ComputerUseToolExecutor {
         }
     }
 
+    private static func runtimeAllowsExecution() -> Bool {
+        !Task.isCancelled && ComputerUseRuntimePolicy.canExecute(
+            runtimeEnabled: SyntheticEventPostingGate.shared.isRuntimeEnabled()
+        )
+    }
+
     static func bundleIdentifierAlias(for appName: String) -> String? {
         appAliases[canonicalAppName(appName)]
     }
@@ -231,23 +240,29 @@ enum ComputerUseToolExecutor {
     }
 
     private static func openApp(named rawName: String) async -> ComputerUseExecutionResult {
+        guard runtimeAllowsExecution() else { return .cancelled() }
         let name = cleanedName(rawName)
         do {
             if let app = runningApplication(named: name) {
+                guard runtimeAllowsExecution() else { return .cancelled() }
                 app.activate(options: [.activateAllWindows])
                 _ = try await waitUntilActive(app: app, timeout: 1.5)
+                guard runtimeAllowsExecution() else { return .cancelled() }
                 return .executed("Opened \(name) (already running)")
             }
 
             guard let appURL = try await applicationURL(for: name) else {
                 return .failed("Could not find \(name)")
             }
+            guard runtimeAllowsExecution() else { return .cancelled() }
 
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             let app = try await openApplication(at: appURL, configuration: configuration)
+            guard runtimeAllowsExecution() else { return .cancelled() }
             app.activate(options: [.activateAllWindows])
             _ = try await waitUntilActive(app: app, timeout: 1.5)
+            guard runtimeAllowsExecution() else { return .cancelled() }
             return .executed("Opened \(name)")
         } catch is CancellationError {
             return .cancelled("Cancelled opening \(name)")
@@ -257,11 +272,14 @@ enum ComputerUseToolExecutor {
     }
 
     private static func focusApp(named rawName: String) async -> ComputerUseExecutionResult {
+        guard runtimeAllowsExecution() else { return .cancelled() }
         let name = cleanedName(rawName)
         if let app = runningApplication(named: name) {
+            guard runtimeAllowsExecution() else { return .cancelled() }
             app.activate(options: [.activateAllWindows])
             do {
                 _ = try await waitUntilActive(app: app, timeout: 1.5)
+                guard runtimeAllowsExecution() else { return .cancelled() }
             } catch is CancellationError {
                 return .cancelled("Cancelled focusing \(name)")
             } catch {
@@ -285,8 +303,10 @@ enum ComputerUseToolExecutor {
         keyDown?.flags = flags
         keyUp?.flags = flags
         guard let keyDown, let keyUp,
-              SyntheticEventPostingGate.shared.post(keyDown),
-              SyntheticEventPostingGate.shared.post(keyUp)
+              SyntheticEventPostingGate.shared.withAuthorizedSequence({ sequence in
+                  sequence.post(keyDown)
+                  sequence.post(keyUp)
+              })
         else {
             return .failed("Synthetic keyboard input is not authorised")
         }
@@ -322,7 +342,11 @@ enum ComputerUseToolExecutor {
             wheel2: deltas.horizontal,
             wheel3: 0
         )
-        guard let event, SyntheticEventPostingGate.shared.post(event) else {
+        guard let event,
+              SyntheticEventPostingGate.shared.withAuthorizedSequence({ sequence in
+                  sequence.post(event)
+              })
+        else {
             return .failed("Synthetic scroll input is not authorised")
         }
         return .executed("Scrolled \(direction.rawValue)")
@@ -505,6 +529,7 @@ enum ComputerUseToolExecutor {
         mode: TextEntryMode
     ) async -> ComputerUseExecutionResult {
         let targetApp = await prepareTextEntryApp(toolCall)
+        guard runtimeAllowsExecution() else { return .cancelled() }
         if case let .failure(message) = targetApp {
             return .failed(message)
         }
@@ -522,6 +547,8 @@ enum ComputerUseToolExecutor {
             }
         }
 
+        guard runtimeAllowsExecution() else { return .cancelled() }
+
         guard focusedEditableTextTarget(requiredApp: app) != nil else {
             let target = textEntryTargetDescription(app: app, toolCall: toolCall)
             return .failed("No focused editable text target\(target). Click an editable note body, title, text field, or text area before using \(mode.toolName).")
@@ -529,6 +556,7 @@ enum ComputerUseToolExecutor {
 
         switch mode {
         case .keyboard:
+            guard runtimeAllowsExecution() else { return .cancelled() }
             PasteController.typeText(toolCall.text ?? "")
             do {
                 try await Task.sleep(nanoseconds: 250_000_000)
@@ -538,6 +566,7 @@ enum ComputerUseToolExecutor {
                 return .failed(error.localizedDescription)
             }
         case .paste:
+            guard runtimeAllowsExecution() else { return .cancelled() }
             PasteController.paste(text: toolCall.text ?? "")
             do {
                 try await Task.sleep(nanoseconds: 700_000_000)
@@ -573,12 +602,14 @@ enum ComputerUseToolExecutor {
     }
 
     private static func prepareTextEntryApp(_ toolCall: ComputerUseToolCall) async -> AppPreparationResult {
+        guard runtimeAllowsExecution() else { return .cancelled }
         let target = textEntryAppName(toolCall)
         guard !target.isEmpty else {
             return .success(nil)
         }
 
         let focusResult = await focusApp(named: target)
+        guard runtimeAllowsExecution() else { return .cancelled }
         if focusResult.status == .cancelled {
             return .cancelled
         }
@@ -602,6 +633,7 @@ enum ComputerUseToolExecutor {
         _ toolCall: ComputerUseToolCall,
         registry: ComputerUseElementRegistry?
     ) async -> ElementFocusResult? {
+        guard runtimeAllowsExecution() else { return .cancelled }
         let element: AXUIElement?
         if let index = toolCall.elementIndex, index > 0 {
             guard let resolved = registry?.element(for: index) else {
@@ -618,6 +650,7 @@ enum ComputerUseToolExecutor {
         }
         guard let element else { return nil }
 
+        guard runtimeAllowsExecution() else { return .cancelled }
         _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, true as CFTypeRef)
         if let rect = rect(of: element) {
             ComputerUseCursorOverlay.shared.show(at: CGPoint(x: rect.midX, y: rect.midY), label: toolCall.label)
@@ -696,16 +729,11 @@ enum ComputerUseToolExecutor {
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
             return .failed("Could not create mouse event")
         }
-        guard SyntheticEventPostingGate.shared.isPostingAllowed() else {
-            return .failed("Synthetic pointer input is not authorised")
-        }
-
-        ComputerUseCursorOverlay.shared.show(at: point, label: toolCall.label)
-        CGWarpMouseCursorPosition(point)
         let button = mouseButton(from: toolCall.button)
         let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
         let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
         let clickCount = max(1, min(toolCall.clicks ?? 1, 2))
+        var clicks: [(down: CGEvent, up: CGEvent)] = []
         for clickIndex in 1...clickCount {
             guard let mouseDown = CGEvent(
                 mouseEventSource: source,
@@ -723,12 +751,19 @@ enum ComputerUseToolExecutor {
             }
             mouseDown.setIntegerValueField(.mouseEventClickState, value: Int64(clickIndex))
             mouseUp.setIntegerValueField(.mouseEventClickState, value: Int64(clickIndex))
-            guard SyntheticEventPostingGate.shared.post(mouseDown),
-                  SyntheticEventPostingGate.shared.post(mouseUp)
-            else {
-                return .failed("Synthetic pointer input is not authorised")
-            }
+            clicks.append((mouseDown, mouseUp))
         }
+
+        guard SyntheticEventPostingGate.shared.withAuthorizedSequence({ sequence in
+            CGWarpMouseCursorPosition(point)
+            for click in clicks {
+                sequence.post(click.down)
+                sequence.post(click.up)
+            }
+        }) else {
+            return .failed("Synthetic pointer input is not authorised")
+        }
+        ComputerUseCursorOverlay.shared.show(at: point, label: toolCall.label)
         let label = toolCall.label?.trimmingCharacters(in: .whitespacesAndNewlines)
         return .executed("Clicked \(label?.isEmpty == false ? label! : "point")")
     }
@@ -740,10 +775,11 @@ enum ComputerUseToolExecutor {
         guard let point = screenPoint(for: toolCall, registry: registry) else {
             return .failed("No current screenshot for cursor move")
         }
-        guard SyntheticEventPostingGate.shared.isPostingAllowed() else {
+        guard SyntheticEventPostingGate.shared.withAuthorizedSequence({ _ in
+            CGWarpMouseCursorPosition(point)
+        }) else {
             return .failed("Synthetic pointer input is not authorised")
         }
-        CGWarpMouseCursorPosition(point)
         ComputerUseCursorOverlay.shared.show(at: point, label: toolCall.label)
         return .executed("Moved cursor to \(Int(point.x.rounded())),\(Int(point.y.rounded()))")
     }
@@ -779,26 +815,31 @@ enum ComputerUseToolExecutor {
             return .failed("Could not create drag event")
         }
 
-        ComputerUseCursorOverlay.shared.show(at: start, label: toolCall.label)
-        guard SyntheticEventPostingGate.shared.post(mouseDown) else {
-            return .failed("Synthetic pointer input is not authorised")
-        }
+        var dragEvents: [CGEvent] = []
         for step in 1...12 {
             let progress = CGFloat(step) / 12
             let point = CGPoint(
                 x: start.x + ((end.x - start.x) * progress),
                 y: start.y + ((end.y - start.y) * progress)
             )
-            if let dragEvent = CGEvent(
+            guard let dragEvent = CGEvent(
                 mouseEventSource: source,
                 mouseType: .leftMouseDragged,
                 mouseCursorPosition: point,
                 mouseButton: .left
-            ), !SyntheticEventPostingGate.shared.post(dragEvent) {
-                return .failed("Synthetic pointer input is not authorised")
+            ) else {
+                return .failed("Could not create drag event")
             }
+            dragEvents.append(dragEvent)
         }
-        guard SyntheticEventPostingGate.shared.post(mouseUp) else {
+
+        guard SyntheticEventPostingGate.shared.withAuthorizedSequence({ sequence in
+            sequence.post(mouseDown)
+            for dragEvent in dragEvents {
+                sequence.post(dragEvent)
+            }
+            sequence.post(mouseUp)
+        }) else {
             return .failed("Synthetic pointer input is not authorised")
         }
         ComputerUseCursorOverlay.shared.show(at: end, label: toolCall.label)
@@ -1081,8 +1122,10 @@ enum ComputerUseToolExecutor {
               let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
               let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
         else { return false }
-        return SyntheticEventPostingGate.shared.post(mouseDown)
-            && SyntheticEventPostingGate.shared.post(mouseUp)
+        return SyntheticEventPostingGate.shared.withAuthorizedSequence { sequence in
+            sequence.post(mouseDown)
+            sequence.post(mouseUp)
+        }
     }
 
     private static func rect(of element: AXUIElement) -> CGRect? {

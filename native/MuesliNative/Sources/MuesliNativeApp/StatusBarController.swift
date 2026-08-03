@@ -106,7 +106,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
 
         guard StatusBarRuntimePolicy.shouldExposeRuntimeActions(
-            hasCompletedOnboarding: controller.config.hasCompletedOnboarding
+            runtimeEnabled: SyntheticEventPostingGate.shared.isRuntimeEnabled()
         ) else {
             menu.addItem(actionItem(
                 title: "Quit \(AppIdentity.displayName)",

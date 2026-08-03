@@ -97,11 +97,10 @@ enum PasteController {
         commandDown?.flags = .maskCommand
         let commandUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         commandUp?.flags = .maskCommand
-        if let commandDown {
-            SyntheticEventPostingGate.shared.post(commandDown)
-        }
-        if let commandUp {
-            SyntheticEventPostingGate.shared.post(commandUp)
+        guard let commandDown, let commandUp else { return }
+        SyntheticEventPostingGate.shared.withAuthorizedSequence { sequence in
+            sequence.post(commandDown)
+            sequence.post(commandUp)
         }
     }
 
@@ -111,8 +110,10 @@ enum PasteController {
         else { return }
         keyDown.flags = flags
         keyUp.flags = flags
-        SyntheticEventPostingGate.shared.post(keyDown)
-        SyntheticEventPostingGate.shared.post(keyUp)
+        SyntheticEventPostingGate.shared.withAuthorizedSequence { sequence in
+            sequence.post(keyDown)
+            sequence.post(keyUp)
+        }
     }
 
     private static func postUnicodeCharacter(source: CGEventSource, char: Character) {
@@ -123,8 +124,10 @@ enum PasteController {
             else { return }
             keyDown.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
             keyUp.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
-            SyntheticEventPostingGate.shared.post(keyDown)
-            SyntheticEventPostingGate.shared.post(keyUp)
+            SyntheticEventPostingGate.shared.withAuthorizedSequence { sequence in
+                sequence.post(keyDown)
+                sequence.post(keyUp)
+            }
         }
     }
 

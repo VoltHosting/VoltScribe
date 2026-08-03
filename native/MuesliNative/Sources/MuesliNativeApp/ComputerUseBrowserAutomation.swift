@@ -255,7 +255,7 @@ enum ComputerUseBrowserAutomation {
         appBundleID == "com.google.Chrome"
     }
 
-    private static func runAppleScript(_ script: String) async throws -> String {
+    static func runAppleScript(_ script: String) async throws -> String {
         if let runAppleScriptForTests {
             return try runAppleScriptForTests(script)
         }
@@ -273,29 +273,47 @@ enum ComputerUseBrowserAutomation {
                         let error = Pipe()
                         process.standardOutput = output
                         process.standardError = error
-                        guard processBox.set(process) else {
-                            throw CancellationError()
+                        try processBox.launch(process)
+
+                        let capture = ProcessOutputCaptureBox()
+                        let readers = DispatchGroup()
+                        readers.enter()
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            capture.setOutput(output.fileHandleForReading.readDataToEndOfFile())
+                            readers.leave()
                         }
-                        try process.run()
+                        readers.enter()
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            capture.setError(error.fileHandleForReading.readDataToEndOfFile())
+                            readers.leave()
+                        }
+
                         process.waitUntilExit()
-
-                        let wasCancelled = processBox.clear()
-                        if wasCancelled {
-                            throw CancellationError()
-                        }
-
-                        let data = output.fileHandleForReading.readDataToEndOfFile()
-                        let errorData = error.fileHandleForReading.readDataToEndOfFile()
+                        readers.wait()
+                        let data = capture.output
+                        let errorData = capture.error
+                        let result: Result<String, Error>
                         if process.terminationStatus != 0 {
                             let message = String(data: errorData, encoding: .utf8) ?? "Apple Events failed"
-                            throw NSError(domain: "ComputerUseBrowserAutomation", code: Int(process.terminationStatus), userInfo: [
+                            result = .failure(NSError(domain: "ComputerUseBrowserAutomation", code: Int(process.terminationStatus), userInfo: [
                                 NSLocalizedDescriptionKey: message.trimmingCharacters(in: .whitespacesAndNewlines),
-                            ])
+                            ]))
+                        } else {
+                            result = .success((String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
                         }
-                        continuation.resume(returning: (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+                        guard processBox.completeIfNotCancelled({
+                            continuation.resume(with: result)
+                        }) else {
+                            continuation.resume(throwing: CancellationError())
+                            return
+                        }
                     } catch {
-                        _ = processBox.clear()
-                        continuation.resume(throwing: error)
+                        guard processBox.completeIfNotCancelled({
+                            continuation.resume(throwing: error)
+                        }) else {
+                            continuation.resume(throwing: CancellationError())
+                            return
+                        }
                     }
                 }
             }
@@ -342,33 +360,112 @@ enum ComputerUseBrowserAutomation {
     }
 }
 
-private final class AppleScriptProcessBox: @unchecked Sendable {
+private final class ProcessOutputCaptureBox: @unchecked Sendable {
     private let lock = NSLock()
+    private var outputData = Data()
+    private var errorData = Data()
+
+    func setOutput(_ data: Data) {
+        lock.lock()
+        outputData = data
+        lock.unlock()
+    }
+
+    func setError(_ data: Data) {
+        lock.lock()
+        errorData = data
+        lock.unlock()
+    }
+
+    var output: Data {
+        lock.lock()
+        let data = outputData
+        lock.unlock()
+        return data
+    }
+
+    var error: Data {
+        lock.lock()
+        let data = errorData
+        lock.unlock()
+        return data
+    }
+}
+
+final class AppleScriptProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private let cancellationLock = NSLock()
     private var process: Process?
     private var cancelled = false
+    private let beforeLaunch: @Sendable () -> Void
+    private let beforeCompletion: @Sendable () -> Void
+    private let onCancellationAttempt: @Sendable () -> Void
+    private let onCancellationRequested: @Sendable () -> Void
 
-    func set(_ process: Process) -> Bool {
+    init(
+        beforeLaunch: @escaping @Sendable () -> Void = {},
+        beforeCompletion: @escaping @Sendable () -> Void = {},
+        onCancellationAttempt: @escaping @Sendable () -> Void = {},
+        onCancellationRequested: @escaping @Sendable () -> Void = {}
+    ) {
+        self.beforeLaunch = beforeLaunch
+        self.beforeCompletion = beforeCompletion
+        self.onCancellationAttempt = onCancellationAttempt
+        self.onCancellationRequested = onCancellationRequested
+    }
+
+    func launch(_ process: Process) throws {
         lock.lock()
         defer { lock.unlock() }
-        guard !cancelled else { return false }
+        guard !isCancellationRequested else { throw CancellationError() }
         self.process = process
-        return true
+        do {
+            beforeLaunch()
+            guard !isCancellationRequested else {
+                self.process = nil
+                throw CancellationError()
+            }
+            try process.run()
+        } catch {
+            self.process = nil
+            throw error
+        }
     }
 
     func cancel() {
-        lock.lock()
+        onCancellationAttempt()
+        cancellationLock.lock()
         cancelled = true
+        cancellationLock.unlock()
+        onCancellationRequested()
+
+        lock.lock()
         let currentProcess = process
         lock.unlock()
-        currentProcess?.terminate()
+        if currentProcess?.isRunning == true {
+            currentProcess?.terminate()
+        }
     }
 
     @discardableResult
-    func clear() -> Bool {
+    func completeIfNotCancelled(_ completion: () -> Void) -> Bool {
         lock.lock()
-        defer { lock.unlock() }
-        let wasCancelled = cancelled
+        cancellationLock.lock()
+        defer {
+            cancellationLock.unlock()
+            lock.unlock()
+        }
         process = nil
-        return wasCancelled
+        guard !cancelled else { return false }
+        beforeCompletion()
+        completion()
+        return true
+    }
+
+    private var isCancellationRequested: Bool {
+        cancellationLock.lock()
+        let value = cancelled
+        cancellationLock.unlock()
+        return value
     }
 }
