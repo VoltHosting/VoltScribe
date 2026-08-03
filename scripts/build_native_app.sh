@@ -23,6 +23,8 @@ APP_BUNDLE_VERSION="${MUESLI_BUNDLE_VERSION:-$APP_VERSION}"
 APP_SHORT_VERSION="${MUESLI_SHORT_VERSION:-$APP_VERSION}"
 SPARKLE_FEED_URL="${MUESLI_SPARKLE_FEED_URL-https://muesli-hq.github.io/muesli/appcast.xml}"
 SPARKLE_EDKEY="${MUESLI_SPARKLE_EDKEY-ok9CQBJ3f0MJ2GXuGBubc6VyeWyb5exmqP2b9DceqH4=}"
+SPARKLE_AUTOMATIC_CHECKS="${MUESLI_SPARKLE_AUTOMATIC_CHECKS:-true}"
+REMOTE_NOTIFICATIONS_ENABLED="${MUESLI_REMOTE_NOTIFICATIONS_ENABLED:-true}"
 STAGED_APP_DIR="$DIST_DIR/$APP_BUNDLE_NAME"
 APP_DIR="$INSTALL_DIR/$APP_BUNDLE_NAME"
 DEFAULT_SIGN_IDENTITY="Developer ID Application: Pranav Hari Guruvayurappan (58W55QJ567)"
@@ -73,6 +75,20 @@ if [[ -z "$TELEMETRYDECK_APP_ID" && "$TELEMETRY_CHANNEL" != "unconfigured" ]]; t
   echo "MUESLI_TELEMETRYDECK_APP_ID is required for channel $TELEMETRY_CHANNEL." >&2
   exit 2
 fi
+case "$SPARKLE_AUTOMATIC_CHECKS" in
+  true|false) ;;
+  *)
+    echo "Invalid MUESLI_SPARKLE_AUTOMATIC_CHECKS: expected true or false." >&2
+    exit 2
+    ;;
+esac
+case "$REMOTE_NOTIFICATIONS_ENABLED" in
+  true|false) ;;
+  *)
+    echo "Invalid MUESLI_REMOTE_NOTIFICATIONS_ENABLED: expected true or false." >&2
+    exit 2
+    ;;
+esac
 
 SWIFT_BUILD_ARGS=(--package-path "$PACKAGE_DIR" -c "$BUILD_CONFIG")
 if ! muesli_spm_scratch_disabled; then
@@ -207,6 +223,8 @@ cat > "$STAGED_APP_DIR/Contents/Info.plist" <<PLIST
   <string>$TELEMETRYDECK_APP_ID</string>
   <key>MuesliTelemetryChannel</key>
   <string>$TELEMETRY_CHANNEL</string>
+  <key>MuesliRemoteNotificationsEnabled</key>
+  <$REMOTE_NOTIFICATIONS_ENABLED/>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
@@ -226,7 +244,7 @@ cat > "$STAGED_APP_DIR/Contents/Info.plist" <<PLIST
   <key>SUPublicEDKey</key>
   <string>$SPARKLE_EDKEY</string>
   <key>SUEnableAutomaticChecks</key>
-  <true/>
+  <$SPARKLE_AUTOMATIC_CHECKS/>
 </dict>
 </plist>
 PLIST

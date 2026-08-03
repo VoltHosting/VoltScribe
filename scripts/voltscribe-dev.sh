@@ -24,6 +24,8 @@ print_config() {
     "telemetry_app_id=" \
     "telemetry_channel=unconfigured" \
     "sparkle_feed_url=" \
+    "sparkle_automatic_checks=false" \
+    "remote_notifications_enabled=false" \
     "entitlements=$ENTITLEMENTS" \
     "skip_sign=1" \
     "scratch_path=$SCRATCH_PATH"
@@ -84,6 +86,8 @@ env \
   MUESLI_TELEMETRYDECK_APP_ID="" \
   MUESLI_TELEMETRY_CHANNEL="unconfigured" \
   MUESLI_SPARKLE_FEED_URL="" \
+  MUESLI_SPARKLE_AUTOMATIC_CHECKS=false \
+  MUESLI_REMOTE_NOTIFICATIONS_ENABLED=false \
   MUESLI_SWIFTPM_SCRATCH_PATH="$SCRATCH_PATH" \
   "$ROOT/scripts/build_native_app.sh" debug
 
