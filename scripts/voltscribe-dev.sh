@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="VoltScribeDev"
-DISPLAY_NAME="VoltScribe Dev"
-APP_BUNDLE_NAME="VoltScribeDev.app"
-EXECUTABLE_NAME="VoltScribeDev"
+APP_NAME="VoltScribe"
+DISPLAY_NAME="VoltScribe"
+APP_BUNDLE_NAME="VoltScribe.app"
+EXECUTABLE_NAME="VoltScribe"
 BUNDLE_ID="uk.co.volthosting.voltscribe.dev"
 SUPPORT_DIRECTORY_NAME="VoltScribeDev"
 INSTALL_DIRECTORY="${VOLTSCRIBE_INSTALL_DIR:-$HOME/Applications}"

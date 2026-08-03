@@ -15,10 +15,10 @@ expect_line() {
   fi
 }
 
-expect_line "app_name=VoltScribeDev"
-expect_line "display_name=VoltScribe Dev"
-expect_line "app_bundle_name=VoltScribeDev.app"
-expect_line "executable_name=VoltScribeDev"
+expect_line "app_name=VoltScribe"
+expect_line "display_name=VoltScribe"
+expect_line "app_bundle_name=VoltScribe.app"
+expect_line "executable_name=VoltScribe"
 expect_line "bundle_id=uk.co.volthosting.voltscribe.dev"
 expect_line "support_directory_name=VoltScribeDev"
 expect_line "install_directory=$HOME/Applications"
